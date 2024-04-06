@@ -1,0 +1,689 @@
+---
+title: 'bayes'
+author: 'Noémie TURMEL'
+date: "2023-09-22"
+output:
+  html_document:
+    number_sections: no
+    table-of-contents: yes
+    toc: yes
+    highlight: tango
+    theme: lumen
+    section-divs: no
+---
+
+# read data and manipulation
+```{r read data}
+medical_cost<- read.table("medical_cost.txt", header = TRUE, stringsAsFactors = FALSE, sep = ",")
+```
+
+```{r precise categorical variable }
+categorical_Var<- c("sex","children","smoker","region")
+#summary(medical_cost)
+group_counts <- table(medical_cost$sex)
+print(group_counts)
+```
+
+```{r descriptive analysis of cat var}
+library(dplyr)
+
+# Assuming your_data is your dataset and categorical_variable_names is a vector containing the names of categorical variables
+
+# Get frequency tables for all specified categorical variables and combine them
+combined_table <- lapply(categorical_Var, function(var) {
+  table(medical_cost[[var]])
+}) %>%
+bind_rows(.id = "Variable")
+
+# Print the combined table
+print(combined_table)
+
+```
+**Comment**
+Patient with 3, 4,5 will be combined since 4,5 have few observations
+
+```{r}
+summary(medical_cost)
+```
+
+
+```{r group nb children}
+#grouping Childdren
+medical_cost$grouped_children <- ifelse(medical_cost$children == 0, "Zero",
+                                 ifelse(medical_cost$children == 1, "One",
+                                        ifelse(medical_cost$children == 2, "Two",
+                                               "Three or more")))
+
+```
+
+```{r bmi grouped}
+medical_cost$bmi4 <- ifelse(medical_cost$bmi < 18.6 , "Underweight",
+                                 ifelse(medical_cost$bmi <25 , "Healthy Weight",
+                                        ifelse(medical_cost$bmi <30, "Overweight",
+                                               "Obesity")))
+medical_cost$bmi2 <- ifelse(medical_cost$bmi < 30 , "less the 30",
+                                               "more then30")
+medical_cost$bmi2 <- as.factor(medical_cost$bmi2)
+medical_cost$bmi4 <- as.factor(medical_cost$bmi4)
+```
+
+##Visualization
+
+```{r hist charges}
+hist(medical_cost$charges)
+```
+***Comment**
+The histogram shows that the distribution of charges is like a gamma distribution
+
+```{r}
+sum(medical_cost$charges > 50000  )
+```
+**Comment**
+There are only 7 person having charges greater then 50000 but i will not deleting them since they are smoker and we have few smokers against non smokers
+
+
+```{r hist charges sex}
+library(ggplot2)
+
+# Assuming your_data is your dataset and contains variables 'charges' and 'smoker'
+
+# Plot histogram for charges, colored by smoker status
+ggplot(medical_cost, aes(x = charges, fill = sex)) +
+  geom_histogram(position = "identity", bins = 30, alpha = 0.5) +
+  labs(title = "Histogram of Charges by gender",
+       x = "Charges",
+       y = "Frequency",
+       fill = "Smoker") +
+  theme_minimal()
+```
+**Comment**
+The charges isn't the same for the male and female , so we will do A Montecarlo Approximation later on
+```{r hist charges sex perc}
+ggplot(medical_cost, aes(x = charges, fill = sex)) +
+  geom_histogram(aes(y = ..density.. * 100),position = "identity", bins = 30, alpha = 0.5) +
+  labs(title = "Histogram of Charges by gender",
+       x = "Charges",
+       y = "Frequency",
+       fill = "gender") +
+  theme_minimal()
+```
+```{r boxplot gender-charges}
+# Combine the data into a list
+male <- medical_cost$charges[medical_cost$sex == "male"]
+female <- medical_cost$charges[medical_cost$sex == "female"]
+
+# Create a side-by-side box plot
+boxplot(list(Group1 = male, Group2 = female), col = c("blue", "pink"), main = "Boxplot of charges by gender ", ylab = "Values", names = c("Male charges", "Female Charges"))
+```
+**Comment**
+Box plot to see if male and female have same mean of charges, and it shows yes 
+```{r boxplot smoker-charges}
+# Combine the data into a list
+smokers <- medical_cost$charges[medical_cost$smoker == "yes"]
+nonsmoker <- medical_cost$charges[medical_cost$smoker == "no"]
+
+# Create a side-by-side box plot
+boxplot(list(Group1 = smokers, Group2 = nonsmoker), col = c("gray", "green"), main = "Boxplots of charges by smoking status", ylab = "Values", names = c("Smoker charges", "non Smoker charges"))
+```
+```{r}
+# Plot histogram for charges, colored by smoker status
+ggplot(medical_cost, aes(x = charges, fill = smoker)) +
+  geom_histogram(aes(y = ..density.. * 100),position = "identity", bins = 30, alpha = 0.5) +
+  labs(title = "Histogram of Charges by Smoking Status",
+       x = "Charges",
+       y = "Percentage",
+       fill = "Smoker") +
+  theme_minimal()+
+  facet_wrap(~ smoker)
+```
+**Comment**
+The two figures above show that charge for smokers has different mean and different distribution comparing to non smoker group
+
+```{r corr plot charge-bmi-smoking stat}
+# charge-bmi-smoking stat corr plot
+ggplot(medical_cost, aes(x = charges, y = bmi, color = smoker)) +
+         geom_point() +
+        labs(x = "Charges", y = "bmi", title = "BMI vs Charges by smoking status") 
+
+```
+**Comment**
+Here we can see that Smokers with BMI more then 30 has the highest charges.So we will be create a binary variable of BMI(greater then 30, less then 30)
+
+```{r bmi-charges}
+#BMI VS Charges
+plot(medical_cost$charges, medical_cost$bmi ,
+     main = "BMI vs Charges",
+     xlab = "Charges",
+     ylab = "BMI",
+     pch = 16,  # Use solid circles for data points
+     col = "gray")
+
+```
+**Comment**
+Charges vs BMI Clustered by 2 groups
+```{r Charges by the 2 bmi groups}
+# Plot histogram for charges, colored by BMI group
+ggplot(medical_cost, aes(x = charges, fill = bmi2)) +
+  geom_histogram(aes(y = ..density.. * 100),position = "identity", bins = 30, alpha = 0.5) +
+  labs(title = "Histogram of Charges by BMI groups",
+       x = "Charges",
+       y = "Percentage",
+       fill = "BMI") +
+  theme_minimal()+
+  facet_wrap(~ bmi2)
+```
+**Comment**
+The 2 bmi groups have clearly different charges distribution, so here more analysis should be done. 
+
+
+```{r charge-bmi-smoking stat}
+#charge-age-smoking stat corr plot
+ggplot(medical_cost, aes(x = age, y = charges, color = smoker)) +
+         geom_point() +
+        labs(y = "Charges", x = "age", title = "age vs Charges by smoking status") 
+
+```
+
+**Comment**
+Nothing new to say other then smokers have high charges.
+
+```{r histogram charges of smokers}
+# his for binary variable smoker
+hist(smokers, breaks = 30, col = "skyblue", border = "black", 
+     main = "Histogram of Distribution", xlab = "Value", ylab = "Frequency")
+```
+
+```{r charges-age}
+
+plot(medical_cost$charges, medical_cost$age, 
+     main = "Ages vs Charges",
+     xlab = "Charges",
+     ylab = "Age",
+     pch = 16,  # Use solid circles for data points
+     col = "gray")
+
+```
+```{r charge-bmi-region stat}
+#charge-age-region stat
+ggplot(medical_cost, aes(x = age, y = charges, color = region)) +
+         geom_point() +
+        labs(y = "Charges", x = "age", title = "age vs Charges by smoking status") 
+
+```
+```{r}
+# Plot histogram for charges, colored by region status
+ggplot(medical_cost, aes(x = charges, fill = region)) +
+  geom_histogram(aes(y = ..density.. * 100),position = "identity", bins = 30, alpha = 0.5) +
+  labs(title = "Histogram of Charges by Smoking Status",
+       x = "Charges",
+       y = "Frequency",
+       fill = "Smoker") +
+ theme_minimal() +
+  facet_wrap(~ region)
+```
+
+```{r boxplot charges by region}
+ggplot(medical_cost, aes(x = region, y = charges)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of charges by region",
+       x = "region",
+       y = "charges")
+```
+
+
+```{r boxplot charges by children}
+ggplot(medical_cost, aes(x = grouped_children, y = charges)) +
+  geom_boxplot() +
+  labs(title = "Boxplot by Groups",
+       x = "Group Variable",
+       y = "Numerical Variable")
+```
+
+```{r}
+#distribution of log c
+hist(log(medical_cost$charges), breaks = 30, col = "skyblue", border = "black", 
+     main = "Histogram of Distribution", xlab = "Value", ylab = "Frequency")
+
+```
+
+
+#Montecarlo Simulation
+```{r montecarlo charges sex}
+# the prior 
+S<-1000
+alpha<-1
+beta<-0.5
+set.seed(42)
+meanf<-mean(female)
+stdf<-sd(female)
+alfaf<- (meanf/stdf)^2
+betaf<- meanf/(stdf^2)
+meanm<-mean(male)
+stdm<-sd(female)
+alfam<- (meanm/stdm)^2
+betam<-meanm/(stdm^2)
+theta_f_sample <- rgamma(n = S, shape = alpha + alfaf,
+rate = beta + betaf)
+theta_m_sample<-rgamma(n = S, shape = alpha + alfam,
+rate = beta + betam)
+sum(theta_f_sample > theta_m_sample )/S
+```
+```{r}
+library(loo)
+
+```
+
+
+# Regression
+
+```{r charges-smokingstatus}
+# bayes regression for log charges and dependent variable and smoking status as independent variable 
+library(rstanarm)
+fit_1 <- stan_glm(log(charges) ~ smoker, data=medical_cost,refresh=0)
+print(fit_1, digits=2)
+```
+**Comment**
+In this model, log(charges) is assumed to be normaly distributed
+The median value of the coefficient for the smoker variable when it is 'yes' is 1.52, with a MAD of 0.05. This indicates how the logarithm of charges changes when comparing smokers to non-smokers. In conclusion, there is relation between smoking status and charges.
+
+
+```{r}
+loocv1 <- loo(fit_1)
+print(loocv1)
+print(loocv1$estimate)
+
+```
+```{r}
+pp_check(fit_1)
+```
+
+
+
+
+```{r charges-smoking-sex}
+# bayes regression for log charges and dependent variable and smoking status and sex as independent variable 
+fit_2 <- stan_glm(log(charges) ~ smoker+sex, data=medical_cost, refresh=0)
+print(fit_2, digits=2)
+```
+
+```{r}
+loocv2 <- loo(fit_2)
+print(loocv2)
+print(loocv2$estimates)
+```
+```{r}
+pp_check(fit_2)
+```
+
+
+```{r charges-children}
+# bayes regression for log charges and dependent variable and smoking status and group children as independent variable 
+fit_3 <- stan_glm(log(charges) ~ smoker+factor(grouped_children), data=medical_cost, refresh=0)
+print(fit_3, digits=2)
+```
+
+```{r}
+loocv3 <- loo(fit_3)
+print(loocv3)
+print(loocv3$estimates)
+```
+
+```{r}
+pp_check(fit_3)
+```
+
+
+**Comment**
+There is relation between amount of charges and number of children with amount of charges, taking into consideration the smoking status. the amount of charges increases with the increase of the number of charges 
+
+```{r charges-children and sex}
+# bayes regression for log charges and dependent variable and smoking status and group children and sex as independent variable 
+fit_4 <- stan_glm(log(charges) ~ smoker+factor(grouped_children) +sex, data=medical_cost, refresh=0)
+print(fit_4, digits=2)
+```
+
+```{r}
+loocv4 <- loo(fit_4)
+print(loocv4)
+print(loocv4$estimates)
+```
+
+**Comment**
+adding sex to the previous model doesn't change the results
+
+
+
+```{r}
+# bayes regression for log charges as dependent variable and smoking status, region  and BMI independent variables 
+fit_5 <- stan_glm(log(charges) ~ smoker+ age+factor(region), data=medical_cost, refresh=0)
+print(fit_5, digits=2)
+```
+
+```{r}
+loocv5 <- loo(fit_5)
+print(loocv5)
+print(loocv5$estimates)
+```
+
+
+
+```{r}
+# bayes regression for log charges as dependent variable and smoking status and BMI(continuous numerical variable) as independent variable 
+fit_6 <- stan_glm(log(charges) ~ smoker+bmi, data=medical_cost, refresh=0)
+print(fit_6, digits=2)
+```
+
+```{r}
+loocv6 <- loo(fit_6)
+print(loocv6)
+print(loocv6$estimates)
+```
+
+**Comment**
+We see that the median for bmi variable is roughly zero, so there is no relation between charges and bmi.
+```{r charges-smokingstatus and bmigroup}
+# bayes regression for log charges and dependent variable and smoking status , and bmi grouped in 4 groups as independent variable 
+library(rstanarm)
+fit_7 <- stan_glm(log(charges) ~ smoker+factor(bmi4), data=medical_cost,refresh=0)
+print(fit_7, digits=2)
+```
+```{r}
+loocv7 <- loo(fit_7)
+print(loocv7)
+print(loocv7$estimates)
+```
+
+
+
+
+```{r charges-smokingstatus and 2 griupsbmi}
+# bayes regression for log charges and dependent variable and smoking status , and bmi grouped in 2 groups as independent variable 
+
+library(rstanarm)
+fit_8 <- stan_glm(log(charges) ~ smoker+factor(bmi2), data=medical_cost,refresh=0)
+print(fit_8, digits=2)
+```
+
+```{r}
+loocv8 <- loo(fit_8)
+print(loocv8)
+print(loocv8$estimate)
+```
+
+
+**Comment**
+I didn't see changes when studying only smokers data
+
+
+
+```{r}
+encoded_smoker <- model.matrix(~ factor(smoker) - 1, data = medical_cost)
+encoded_smoker_df <- as.data.frame(encoded_smoker)
+data <- cbind(medical_cost, encoded_smoker_df)
+
+encoded_bmi2 <- model.matrix(~ factor(bmi2) - 1, data = data)
+encoded_bmi2_df <- as.data.frame(encoded_bmi2)
+data <- cbind(data, encoded_bmi2_df)
+
+```
+
+
+```{r}
+set.seed(123) # For reproducibility
+index <- sample(1:nrow(data), round(0.8 * nrow(data)))
+train_data <- data[index, ]
+test_data <- data[-index, ]
+
+```
+
+
+```{r}
+model <- stan_glm(log(charges) ~ age + `factor(bmi2)more then30`+ children + `factor(smoker)yes`,
+                  data = train_data,
+                  family = gaussian(),
+                  prior = normal(0, 2),
+                  chains = 4,
+                  seed = 12345)
+```
+
+
+```{r}
+summary(model)
+loocv69 <- loo(model)
+print(loocv69)
+```
+
+```{r}
+plot(model)
+pp_check(model)
+```
+```{r}
+# Extraction des échantillons a poste
+```
+
+```{r}
+posterior_pred <- posterior_predict(model, newdata = test_data)
+predicted_means <- colMeans(posterior_pred)
+```
+
+```{r}
+compare_df <- data.frame(actual = test_data$charges, predicted = predicted_means)
+
+head(compare_df)
+```
+
+
+```{r}
+# Calcul de l'erreur absolue moyenne (MAE)
+MAE <- mean(abs(test_data$charge - predicted_means))
+print(paste("MAE:", MAE))
+
+# Calcul de l'erreur quadratique moyenne (MSE)
+MSE <- mean((test_data$charge - predicted_means)^2)
+print(paste("MSE:", MSE))
+
+# Calcul de l'erreur quadratique moyenne racine (RMSE)
+RMSE <- sqrt(MSE)
+print(paste("RMSE:", RMSE))
+
+# Calcul de l'erreur relative moyenne (MRE)
+MRE <- mean(abs((test_data$charge - predicted_means) / test_data$charge) * 100)
+print(paste("MRE:", MRE))
+
+```
+
+```{r}
+boxplot(list(predicted_means, test_data$charge), names = c("Prédites", "Actuelles"),
+        main = "Comparaison des charges prédites et actuelles",
+        ylab = "Charges", col = c("blue", "red"))
+```
+
+
+
+
+
+
+```{r}
+plot(fit_1)
+pp_check(fit_1)
+```
+
+```{r}
+posterior_pred2<- posterior_predict(fit_1, newdata = test_data)
+predicted_means2 <- colMeans(posterior_pred)
+```
+
+```{r}
+compare_df <- data.frame(actual = test_data$charges, predicted = predicted_means2)
+
+head(compare_df)
+```
+
+
+```{r}
+
+# Calcul de l'erreur absolue moyenne (MAE)
+MAE <- mean(abs(test_data$charge - predicted_means2))
+print(paste("MAE:", MAE))
+
+# Calcul de l'erreur quadratique moyenne (MSE)
+MSE <- mean((test_data$charge - predicted_means2)^2)
+print(paste("MSE:", MSE))
+
+# Calcul de l'erreur quadratique moyenne racine (RMSE)
+RMSE <- sqrt(MSE)
+print(paste("RMSE:", RMSE))
+
+# Calcul de l'erreur relative moyenne (MRE)
+MRE <- mean(abs((test_data$charge - predicted_means2) / test_data$charge) * 100)
+print(paste("MRE:", MRE))
+
+```
+
+```{r}
+boxplot(list(predicted_means, test_data$charge), names = c("Prédites", "Actuelles"),
+        main = "Comparaison des charges prédites et actuelles",
+        ylab = "Charges", col = c("blue", "red"))
+```
+
+
+
+```{r}
+comparison <- loo_compare(loocv1, loocv2, loocv3, loocv4, loocv5, loocv6, loocv7, loocv8)
+print(comparison)
+
+```
+
+
+
+```{r}
+fit_55 <- stan_glm(log(charges) ~ smoker+ age+factor(region), data=train_data, refresh=0)
+loocv55 <- loo(fit_55)
+
+comparison2 <- loo_compare(loocv55, loocv69)
+
+print(comparison2)
+```
+
+```{r}
+model2 <- stan_glm(log(charges) ~ age + `factor(bmi2)more then30`+ children + `factor(smoker)yes` + region,
+                  data = train_data,
+                  family = gaussian(),
+                  prior = normal(0, 2),
+                  chains = 4,
+                  seed = 12345)
+```
+
+
+
+
+
+
+```{r}
+# Assurez-vous d'avoir chargé la bibliothèque rstanarm
+library(rstanarm)
+
+# Faites la régression en utilisant stan_glm
+# Remplacez formule, data=mon_donnees par vos données et formule de régression
+
+
+# Pour obtenir un résumé des résultats, y compris les distributions des coefficients
+print(model2)
+
+# Pour obtenir spécifiquement les distributions des coefficients
+posterior <- as.data.frame(model2)
+
+# Afficher les premières lignes pour aperçu
+head(posterior)
+
+# Pour un aperçu graphique des distributions, vous pouvez utiliser le package bayesplot
+library(bayesplot)
+mcmc_areas(posterior, prob = 0.5)  # Modifier prob pour ajuster l'intervalle de crédibilité
+
+
+
+summary(posterior)
+
+
+```
+
+
+
+# plot predicted vs true values
+
+```{r}
+d=medical_cost
+d$charges=log(d$charges)
+d$bmi2=ifelse(d$bmi2=="less the 30",0,1)
+d$smoker=ifelse(d$smoker=="yes",1,0)
+# intecerp age bmi2 fumeur enfants
+coeff=c(7.32,0.03359,0.14207,1.551,0.09932)
+
+
+
+ggplot(data = d, aes(x = charges, y = ( coeff[1] + coeff[2]*age + coeff[3]*bmi2 + coeff[4] * smoker + coeff[5] * children )                     )) +
+    geom_point() +  # Ajoute les points
+    geom_abline(intercept = 0, slope = 1, color = "red") +  # Ajoute la ligne x = y en rouge
+     labs(title="régression bayésienne",x = "True log charge value", y = "Predicted log charge value")+
+    theme_minimal()  # Utilise un thème minimal pour le tracé
+
+y_pred=coeff[1] + coeff[2]*d$age + coeff[3]*d$bmi2 + coeff[4] * d$smoker + coeff[5] * d$children 
+
+
+rmse <- function(y, y_pred) {
+  return(sqrt(mean((y - y_pred)^2)))
+}
+rmse_value <- rmse(exp(d$charges), exp(y_pred))
+
+rmse_value <- rmse(d$charges, y_pred)
+print(paste("RMSE:", rmse_value))
+
+
+
+ggplot(data = d, aes(x = exp(charges), y = exp( coeff[1] + coeff[2]*age + coeff[3]*bmi2 + coeff[4] * smoker + coeff[5] * children )                     )) +
+    geom_point() +  # Ajoute les points
+    geom_abline(intercept = 0, slope = 1, color = "blue") +  # Ajoute la ligne x = y en rouge
+    labs(title="régression bayésienne",x = "True charge value", y = "Predicted charge value") +  # Ajoute les labels des axes
+    theme_minimal()  # Utilise un thème minimal pour le tracé
+
+#######################
+
+
+
+
+reg=lm(formula = charges ~ age + bmi2+ smoker + children,data = d)
+y_pred_freq <- predict(reg)
+
+
+
+
+rmse_value <- rmse(exp(d$charges), exp(y_pred_freq))
+print(paste("RMSE:", rmse_value))
+rmse_value <- rmse(d$charges, y_pred_freq)
+print(paste("RMSE:", rmse_value))
+
+
+
+p=cbind(d,y_pred_freq)
+
+ggplot(data = p, aes(x = charges, y = y_pred_freq)) +
+    geom_point() +  # Ajoute les points
+    geom_abline(intercept = 0, slope = 1, color = "orange") +  # Ajoute la ligne x = y en rouge
+     labs(title="régression fréquentiste",x = "True log charge value", y = "Predicted log charge value")+
+    theme_minimal()  # Utilise un thème minimal pour le tracé
+
+
+
+ggplot(data = p, aes(x = exp(charges), y = exp(y_pred_freq))) +
+    geom_point() +  # Ajoute les points
+    geom_abline(intercept = 0, slope = 1, color = "purple") +  # Ajoute la ligne x = y en rouge
+    labs(title="régression bayésienne",x = "True charge value", y = "Predicted charge value") +  # Ajoute les labels des axes
+    theme_minimal()  # Utilise un thème minimal pour le tracé
+
+
+
+
+```
+
+
+
